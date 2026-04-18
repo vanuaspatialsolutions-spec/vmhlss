@@ -41,10 +41,17 @@ export default function MapQueryWorkspace() {
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: getMapStyle(baseMap),
-      center: mapCenter,
+      center: mapCenter as [number, number],
       zoom: mapZoom,
       pitch: 0,
       bearing: 0,
+    });
+
+    // Force resize after mount so MapLibre picks up the correct canvas dimensions
+    setTimeout(() => { map.current?.resize(); }, 100);
+
+    map.current.on('error', (e) => {
+      console.warn('MapLibre error:', e);
     });
 
     map.current.on('move', () => {
@@ -57,14 +64,6 @@ export default function MapQueryWorkspace() {
     // Add baseline layers
     map.current.on('load', () => {
       if (!map.current) return;
-
-      // Add background layer
-      map.current.addLayer({
-        id: 'background',
-        type: 'background',
-        paint: { 'background-color': '#f0f0f0' },
-      });
-
       // Add demo hazard layers
       addHazardLayers(map.current);
       addSuitabilityLayers(map.current);
@@ -282,8 +281,8 @@ export default function MapQueryWorkspace() {
       )}
 
       {/* Center: Map */}
-      <div className="flex-1 bg-gray-200 rounded-lg overflow-hidden shadow-md relative">
-        <div ref={mapContainer} className="w-full h-full" />
+      <div className="flex-1 bg-gray-200 rounded-lg overflow-hidden shadow-md relative min-h-0">
+        <div ref={mapContainer} className="absolute inset-0" />
 
         {/* Popup */}
         {popupPosition && popupContent && (
@@ -378,7 +377,7 @@ export default function MapQueryWorkspace() {
   );
 }
 
-// Helper functions — returns a MapLibre style object (or URL string with API key)
+// Helper functions — returns a MapLibre StyleSpecification object or URL string
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getMapStyle(baseMap: string): any {
   const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || '';
@@ -390,31 +389,45 @@ function getMapStyle(baseMap: string): any {
     };
     return styles[baseMap] || styles.osm;
   }
-  // Fallback: inline raster styles using free tile providers (no API key needed)
+
+  // Free raster tile styles — CARTO CDN tiles have open CORS headers
+  const cartoLight = [
+    'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  ];
+  const cartoSatBase = [
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  ];
+  const osmTiles = [
+    'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  ];
+
   const freeStyles: Record<string, object> = {
     osm: {
       version: 8,
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources: {
-        osm: {
+        carto: {
           type: 'raster',
-          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tiles: cartoLight,
           tileSize: 256,
-          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          attribution: '© <a href="https://carto.com">CARTO</a> © <a href="https://openstreetmap.org">OSM</a>',
           maxzoom: 19,
         },
       },
-      layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+      layers: [{ id: 'carto-base', type: 'raster', source: 'carto' }],
     },
     satellite: {
       version: 8,
       sources: {
         esri: {
           type: 'raster',
-          tiles: [
-            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-          ],
+          tiles: cartoSatBase,
           tileSize: 256,
-          attribution: 'Tiles © Esri',
+          attribution: 'Tiles © Esri — Source: Esri, Maxar, GeoEye',
           maxzoom: 19,
         },
       },
@@ -423,18 +436,18 @@ function getMapStyle(baseMap: string): any {
     topographic: {
       version: 8,
       sources: {
-        topo: {
+        osm: {
           type: 'raster',
-          tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
+          tiles: osmTiles,
           tileSize: 256,
-          attribution: '© <a href="https://opentopomap.org">OpenTopoMap</a>',
-          maxzoom: 17,
+          attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+          maxzoom: 19,
         },
       },
-      layers: [{ id: 'topo', type: 'raster', source: 'topo' }],
+      layers: [{ id: 'osm-topo', type: 'raster', source: 'osm' }],
     },
   };
-  // Return the object directly — MapLibre accepts StyleSpecification objects
+
   return freeStyles[baseMap] || freeStyles.osm;
 }
 
