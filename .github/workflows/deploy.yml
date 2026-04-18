@@ -7,14 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ============================================================
-  # JOB 1: Deploy Frontend to GitHub Pages
-  # ============================================================
   deploy-frontend:
-    name: Deploy Frontend → GitHub Pages
+    name: Deploy Frontend to GitHub Pages
     runs-on: ubuntu-latest
 
-    # Required so peaceiris/actions-gh-pages can push to gh-pages
     permissions:
       contents: write
 
@@ -26,18 +22,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: |
           cd frontend
           npm install --legacy-peer-deps
 
-      - name: Build frontend
+      - name: Build
         env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://vmhlss-api.onrender.com/api' }}
-          VITE_MAPLIBRE_STYLE_URL: ${{ secrets.VITE_MAPLIBRE_STYLE_URL || '' }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_MAPLIBRE_STYLE_URL: ${{ secrets.VITE_MAPLIBRE_STYLE_URL }}
         run: |
           cd frontend
           npm run build
@@ -49,44 +45,25 @@ jobs:
           publish_dir: ./frontend/dist
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: 'deploy: ${{ github.sha }}'
 
-  # ============================================================
-  # JOB 2: Deploy Backend to Render
-  # Skipped if RENDER_API_KEY secret is not set.
-  # ============================================================
   deploy-backend:
-    name: Deploy Backend → Render
+    name: Deploy Backend to Render
     runs-on: ubuntu-latest
-    if: ${{ secrets.RENDER_API_KEY != '' }}
+    needs: deploy-frontend
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Trigger Render deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
         run: |
-          if [ -z "${{ secrets.RENDER_API_KEY }}" ]; then
-            echo "RENDER_API_KEY not set — skipping Render deploy"
+          if [ -z "$RENDER_API_KEY" ] || [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "RENDER_API_KEY or RENDER_SERVICE_ID not configured — skipping."
             exit 0
           fi
           curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
-            -d '{"clearCache": false}' \
-            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys"
+            -d '{"clearCache":false}' \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys"
           echo "Render deploy triggered."
-
-      - name: Wait for backend health
-        run: |
-          API_URL="${{ secrets.VITE_API_URL || 'https://vmhlss-api.onrender.com' }}"
-          for i in {1..30}; do
-            if curl -s -f "${API_URL%/api}/health" > /dev/null 2>&1; then
-              echo "✓ Backend healthy after $((i * 10))s"
-              exit 0
-            fi
-            echo "Attempt $i/30: waiting…"
-            sleep 10
-          done
-          echo "⚠ Backend health check timed out (may still be starting)"
-          exit 0
