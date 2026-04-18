@@ -37,9 +37,9 @@ export default function TopNavBar() {
           <div className="flex items-center gap-3">
             {/* VSS Logo */}
             <img
-              src="/vmhlss/vss-logo.svg"
+              src="/vmhlss/vss-logo.jpg"
               alt="Vanua Spatial Solutions"
-              className="w-12 h-12 rounded-lg shadow-sm"
+              className="w-12 h-12 object-contain"
               title="Vanua Spatial Solutions"
             />
 
@@ -108,7 +108,7 @@ export default function TopNavBar() {
             {/* VSS small logo badge on right */}
             <div className="hidden lg:flex items-center gap-1.5 border-l border-gray-200 pl-3">
               <img
-                src="/vmhlss/vss-logo.svg"
+                src="/vmhlss/vss-logo.jpg"
                 alt="VSS"
                 className="w-6 h-6 rounded"
               />
