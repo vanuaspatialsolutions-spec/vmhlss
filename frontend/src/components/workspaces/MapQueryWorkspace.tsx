@@ -378,9 +378,9 @@ export default function MapQueryWorkspace() {
   );
 }
 
-// Helper functions
-function getMapStyle(baseMap: string): string {
-  // Free, no-key-required styles via MapLibre demo tiles and OSM
+// Helper functions — returns a MapLibre style object (or URL string with API key)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getMapStyle(baseMap: string): any {
   const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || '';
   if (MAPTILER_KEY) {
     const styles: Record<string, string> = {
@@ -390,7 +390,7 @@ function getMapStyle(baseMap: string): string {
     };
     return styles[baseMap] || styles.osm;
   }
-  // Fallback: free OSM raster style (no API key needed)
+  // Fallback: inline raster styles using free tile providers (no API key needed)
   const freeStyles: Record<string, object> = {
     osm: {
       version: 8,
@@ -399,7 +399,7 @@ function getMapStyle(baseMap: string): string {
           type: 'raster',
           tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
           tileSize: 256,
-          attribution: '© OpenStreetMap contributors',
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           maxzoom: 19,
         },
       },
@@ -427,14 +427,15 @@ function getMapStyle(baseMap: string): string {
           type: 'raster',
           tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
           tileSize: 256,
-          attribution: '© OpenTopoMap contributors',
+          attribution: '© <a href="https://opentopomap.org">OpenTopoMap</a>',
           maxzoom: 17,
         },
       },
       layers: [{ id: 'topo', type: 'raster', source: 'topo' }],
     },
   };
-  return JSON.stringify(freeStyles[baseMap] || freeStyles.osm);
+  // Return the object directly — MapLibre accepts StyleSpecification objects
+  return freeStyles[baseMap] || freeStyles.osm;
 }
 
 function addHazardLayers(map: MapLibreMap) {

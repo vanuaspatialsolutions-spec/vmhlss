@@ -21,9 +21,9 @@ export default function DataDashboard() {
         const data = await apiService.getSlots();
         setSlots(data);
       } catch (err) {
-        console.error('Failed to fetch slots:', err);
-        setError('Failed to load dataset slots');
-        // Load mock data for demo
+        console.info('Backend not connected — loading demo data:', err);
+        setError('demo');
+        // Load mock data for demo mode
         loadMockSlots();
       }
     };
@@ -232,10 +232,16 @@ export default function DataDashboard() {
           </div>
         </section>
 
-        {/* Info Box */}
-        {error && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p className="text-sm text-yellow-800">{error}</p>
+        {/* Demo mode notice */}
+        {error === 'demo' && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3">
+            <span className="text-blue-500 text-lg">🔵</span>
+            <div>
+              <p className="text-sm font-semibold text-blue-800">Demo Mode — Sample Data</p>
+              <p className="text-xs text-blue-600">
+                Backend not connected. Showing representative dataset slots. Connect a backend API to manage real data.
+              </p>
+            </div>
           </div>
         )}
       </div>
