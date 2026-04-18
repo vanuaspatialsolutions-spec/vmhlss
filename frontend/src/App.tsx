@@ -21,7 +21,7 @@ function App() {
   }, []);
 
   return (
-    <Router>
+    <Router basename="/vmhlss">
       <div className="flex flex-col h-screen bg-gray-50">
         <TopNavBar />
         <div className="flex-1 overflow-hidden">
