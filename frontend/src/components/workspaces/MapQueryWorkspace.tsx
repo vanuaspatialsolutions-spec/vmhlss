@@ -5,6 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useAuthStore, useAnalysisStore, useMapStore, useUIStore } from '../../store/index';
 import { useTranslation } from '../../i18n/index';
 import { apiService } from '../../services/api';
+import { useOSMLayers } from '../../hooks/useOSMLayers';
 import MapLayerPanel from '../map/MapLayerPanel';
 import QueryPanel from '../map/QueryPanel';
 import ResultsPopup from '../map/ResultsPopup';
@@ -14,10 +15,14 @@ export default function MapQueryWorkspace() {
   const navigate = useNavigate();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [drawMode, setDrawMode] = useState<'polygon' | 'rectangle' | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<[number, number][]>([]);
   const [popupContent, setPopupContent] = useState<any>(null);
   const [popupPosition, setPopupPosition] = useState<[number, number] | null>(null);
+
+  // OSM layers — fetched from Overpass API and added to map automatically
+  const osmStatus = useOSMLayers(map.current, mapLoaded);
 
   const { language } = useAuthStore();
   const { t } = useTranslation(language);
@@ -61,10 +66,10 @@ export default function MapQueryWorkspace() {
       }
     });
 
-    // Add baseline layers
+    // Mark map as loaded — triggers OSM layer fetching
     map.current.on('load', () => {
       if (!map.current) return;
-      // Add demo hazard layers
+      setMapLoaded(true);
       addHazardLayers(map.current);
       addSuitabilityLayers(map.current);
     });
@@ -350,6 +355,38 @@ export default function MapQueryWorkspace() {
             </button>
           ))}
         </div>
+
+        {/* OSM Layer Loading Status */}
+        {Object.values(osmStatus).some(s => s === 'loading' || s === 'idle') && (
+          <div className="absolute bottom-16 left-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-xs space-y-1 min-w-[180px]">
+            <p className="font-semibold text-gray-700 mb-1">Loading GIS Layers</p>
+            {([
+              { key: 'buildings', label: '🏠 Buildings', color: '#d4956a' },
+              { key: 'roads',     label: '🛣️ Roads',     color: '#888' },
+              { key: 'waterways', label: '🌊 Rivers & Streams', color: '#4a90d9' },
+              { key: 'parks',     label: '🌿 Parks',     color: '#55a630' },
+            ] as const).map(({ key, label, color }) => {
+              const s = osmStatus[key];
+              return (
+                <div key={key} className="flex items-center gap-2">
+                  <span style={{ color }} className="w-3 text-center">
+                    {s === 'loaded' ? '✓' : s === 'error' ? '✗' : s === 'loading' ? '⟳' : '○'}
+                  </span>
+                  <span className={s === 'loaded' ? 'text-gray-600' : s === 'error' ? 'text-red-500' : 'text-gray-400'}>
+                    {label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* OSM Layers Loaded Badge */}
+        {Object.values(osmStatus).every(s => s === 'loaded' || s === 'error') && (
+          <div className="absolute bottom-16 left-4 bg-green-600/90 text-white rounded-lg shadow px-3 py-1.5 text-xs font-medium flex items-center gap-1.5">
+            <span>✓</span> GIS layers loaded from OpenStreetMap
+          </div>
+        )}
 
         {/* Processing Overlay */}
         {isProcessing && (
