@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState, useRef } from 'react';
+import type { RefObject } from 'react';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 
 // ---------------------------------------------------------------------------
@@ -274,7 +275,7 @@ function addToMap(
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
-export function useOSMLayers(map: MapLibreMap | null, mapLoaded: boolean) {
+export function useOSMLayers(mapRef: RefObject<MapLibreMap | null>, mapLoaded: boolean) {
   const [status, setStatus] = useState<OSMLayerState>({
     buildings: 'idle',
     roads: 'idle',
@@ -284,7 +285,8 @@ export function useOSMLayers(map: MapLibreMap | null, mapLoaded: boolean) {
   const fetchedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!map || !mapLoaded) return;
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
 
     // Use sessionStorage to cache GeoJSON per layer
     const loadLayer = async (layerCfg: typeof LAYERS[0]) => {
@@ -333,7 +335,7 @@ export function useOSMLayers(map: MapLibreMap | null, mapLoaded: boolean) {
         await new Promise(r => setTimeout(r, 500));
       }
     })();
-  }, [map, mapLoaded]);
+  }, [mapLoaded]); // mapRef is stable — only mapLoaded triggers re-run
 
   return status;
 }
