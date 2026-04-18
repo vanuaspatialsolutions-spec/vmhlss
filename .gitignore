@@ -1,0 +1,242 @@
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*.local
+
+# GIS data files
+*.gpkg
+*.geopackage
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.tif
+*.tiff
+*.jp2
+*.png
+*.img
+*.vrt
+*.json.aux.xml
+*.tif.aux.xml
+
+# Raster data
+*.tfw
+*.jgw
+*.pgw
+*.gfw
+
+# Vector data backups
+*.bak
+*.backup
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+*.sublime-project
+
+# Frontend
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+build/
+.next/
+out/
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+frontend/.env.local
+
+# Uploads and temp files
+uploads/
+uploads/*
+!uploads/.gitkeep
+temp/
+tmp/
+*.tmp
+
+# Database
+*.sql.bak
+*.sql.backup
+postgres_data/
+redis_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+coverage/
+*.cover
+.pytest_cache
+
+# Cache
+.cache/
+.eslintcache
+.stylelintcache
+
+# Misc
+.env.production.local
+.env.test.local
+.env.staging.local
+*.pem
+*.key
+*.cert
+*.crt
+.ssl/
+ssl/
+!ssl/.gitkeep
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# IntelliJ
+*.iml
+*.iws
+*.ipr
+.idea/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Netbeans
+nbproject/private/
+build/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# Archives
+*.zip
+*.rar
+*.7z
+*.tar.gz
+*.tar.bz2
+
+# Config overrides
+docker-compose.local.yml
+.env.development.local
+settings.local.py
+
+# Mac
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# GIS specific
+*.shz
+*.dwg
+*.dwf
+*.dgn
+*.kml
+*.kmz
+*.gpx
+*.fit
+*.geojson
+*.gml
+*.gfs
+*.vrt
+
+# Celery
+celerybeat-schedule
+
+# Generated files
+coverage.xml
+*.cover
+__pycache__
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# Output files
+*.csv
+*.xlsx
+*.xls
+export/
+reports/
+
+# Temporary files
+*~
+*.tmp
+*.temp
+.#*
+
+# Environment specific
+.env.dev
+.env.test
+.env.prod

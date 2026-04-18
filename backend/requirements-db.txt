@@ -1,0 +1,23 @@
+# Database Requirements for VMHLSS
+# Install with: pip install -r requirements-db.txt
+
+# SQLAlchemy ORM
+sqlalchemy==2.0.23
+
+# Database Adapter for PostgreSQL
+psycopg2-binary==2.9.9
+
+# Spatial Database Support
+geoalchemy2==0.14.2
+
+# Database Migrations
+alembic==1.12.1
+
+# Optional: FastAPI integration (if using FastAPI for API)
+# fastapi==0.104.1
+# uvicorn==0.24.0
+
+# Optional: Development/Testing
+# pytest==7.4.3
+# pytest-asyncio==0.21.1
+# sqlalchemy-utils==0.41.1

@@ -1,0 +1,126 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgis/postgis:15-3.4
+    environment:
+      POSTGRES_DB: vmhlss
+      POSTGRES_USER: vmhlss_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vmhlss_user -d vmhlss"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vmhlss-network
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - vmhlss-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://vmhlss_user:${DB_PASSWORD}@db:5432/vmhlss
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      UPLOAD_DIR: /app/uploads
+      ENVIRONMENT: development
+      MAX_UPLOAD_SIZE_MB: 500
+      CORS_ORIGINS: http://localhost:3000
+    volumes:
+      - ./uploads:/app/uploads
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    networks:
+      - vmhlss-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app worker --loglevel=info
+    depends_on:
+      - db
+      - redis
+    environment:
+      DATABASE_URL: postgresql://vmhlss_user:${DB_PASSWORD}@db:5432/vmhlss
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      UPLOAD_DIR: /app/uploads
+      ENVIRONMENT: development
+    volumes:
+      - ./uploads:/app/uploads
+      - ./backend:/app
+    networks:
+      - vmhlss-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_MAPLIBRE_STYLE_URL: ${MAPLIBRE_STYLE_URL:-https://demotiles.maplibre.org/style.json}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - vmhlss-network
+    command: npm run dev
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/templates/default.conf.template
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      UPSTREAM_BACKEND: backend:8000
+      UPSTREAM_FRONTEND: frontend:3000
+      UPSTREAM_TILES: tileserv:7800
+    networks:
+      - vmhlss-network
+
+  tileserv:
+    image: pramsey/pg_tileserv:latest
+    environment:
+      DATABASE_URL: postgresql://vmhlss_user:${DB_PASSWORD}@db:5432/vmhlss
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "7800:7800"
+    networks:
+      - vmhlss-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  vmhlss-network:
+    driver: bridge

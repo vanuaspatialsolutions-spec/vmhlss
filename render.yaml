@@ -1,0 +1,303 @@
+services:
+  # PostgreSQL Database with PostGIS
+  - type: pserv
+    name: vmhlss-db
+    plan: standard
+    region: oregon
+    databaseName: vmhlss
+    user: vmhlss_user
+    postgresSQLVersion: 15
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: All IPs
+    preDeployCommand: |
+      CREATE EXTENSION IF NOT EXISTS postgis;
+      CREATE EXTENSION IF NOT EXISTS pgvector;
+      CREATE EXTENSION IF NOT EXISTS json1;
+    environmentTable:
+      - key: DATABASE_URL
+        fromService:
+          name: vmhlss-db
+          property: connectionString
+
+  # Redis Cache
+  - type: redis
+    name: vmhlss-redis
+    plan: free
+    region: oregon
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: All IPs
+    environmentTable:
+      - key: REDIS_URL
+        fromService:
+          name: vmhlss-redis
+          property: connectionString
+
+  # Backend API Service
+  - type: web
+    name: vmhlss-api
+    plan: standard
+    region: oregon
+    runtime: python
+    runtimeVersion: 3.11
+    repo: https://github.com/vanuatu-dss/vmhlss
+    branch: main
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      alembic upgrade head
+    startCommand: |
+      gunicorn app.main:app \
+        -w 4 \
+        -k uvicorn.workers.UvicornWorker \
+        --bind 0.0.0.0:8000 \
+        --access-logfile - \
+        --error-logfile - \
+        --log-level info \
+        --timeout 120 \
+        --workers-per-core 2 \
+        --max-requests 1000 \
+        --max-requests-jitter 100
+    rootDir: backend
+    disk:
+      name: vmhlss-uploads
+      mountPath: /app/uploads
+      sizeGB: 10
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          name: vmhlss-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: vmhlss-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: WORKERS
+        value: 4
+      - key: UPLOAD_DIR
+        value: /app/uploads
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 500
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRATION_HOURS
+        value: 24
+      - key: SQLALCHEMY_ECHO
+        value: false
+      - key: TESTING
+        value: false
+      - key: DEBUG
+        value: false
+    secretFiles:
+      - varName: JWT_SECRET_KEY
+        name: jwt_secret_key
+      - varName: ANTHROPIC_API_KEY
+        name: anthropic_api_key
+      - varName: DB_PASSWORD
+        name: db_password
+    healthCheckPath: /health
+    healthCheckInterval: 30
+    healthCheckTimeoutSeconds: 10
+    headers:
+      - http:
+        - path: /api/*
+          name: X-Frame-Options
+          value: SAMEORIGIN
+        - path: /api/*
+          name: X-Content-Type-Options
+          value: nosniff
+        - path: /api/*
+          name: X-XSS-Protection
+          value: "1; mode=block"
+    autoDeploy: true
+    preDeployCommand: |
+      alembic upgrade head
+      python -m pytest tests/ -v --tb=short || true
+
+  # Celery Worker
+  - type: worker
+    name: vmhlss-celery
+    plan: standard
+    region: oregon
+    runtime: python
+    runtimeVersion: 3.11
+    repo: https://github.com/vanuatu-dss/vmhlss
+    branch: main
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      celery -A app.celery_app worker \
+        --loglevel=info \
+        --concurrency=2 \
+        --max-tasks-per-child=1000 \
+        --time-limit=3600 \
+        --soft-time-limit=3000
+    rootDir: backend
+    disk:
+      name: vmhlss-celery-storage
+      mountPath: /app/uploads
+      sizeGB: 10
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          name: vmhlss-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: vmhlss-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: UPLOAD_DIR
+        value: /app/uploads
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: vmhlss-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: vmhlss-redis
+          property: connectionString
+      - key: CELERY_TASK_TIME_LIMIT
+        value: 3600
+      - key: CELERY_TASK_SOFT_TIME_LIMIT
+        value: 3000
+    secretFiles:
+      - varName: ANTHROPIC_API_KEY
+        name: anthropic_api_key
+
+  # Celery Beat Scheduler
+  - type: worker
+    name: vmhlss-celery-beat
+    plan: standard
+    region: oregon
+    runtime: python
+    runtimeVersion: 3.11
+    repo: https://github.com/vanuatu-dss/vmhlss
+    branch: main
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      celery -A app.celery_app beat \
+        --loglevel=info \
+        --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    rootDir: backend
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          name: vmhlss-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: vmhlss-redis
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: info
+    secretFiles:
+      - varName: ANTHROPIC_API_KEY
+        name: anthropic_api_key
+
+  # Frontend
+  - type: web
+    name: vmhlss-frontend
+    plan: standard
+    region: oregon
+    runtime: node
+    runtimeVersion: 20
+    repo: https://github.com/vanuatu-dss/vmhlss
+    branch: main
+    buildCommand: |
+      npm ci
+      npm run build
+    startCommand: npm run preview
+    rootDir: frontend
+    envVars:
+      - key: VITE_API_URL
+        value: https://vmhlss-api.onrender.com
+      - key: VITE_MAPLIBRE_STYLE_URL
+        value: https://demotiles.maplibre.org/style.json
+      - key: VITE_ENVIRONMENT
+        value: production
+    autoDeploy: true
+    headers:
+      - http:
+        - path: /*
+          name: X-Frame-Options
+          value: SAMEORIGIN
+        - path: /*
+          name: X-Content-Type-Options
+          value: nosniff
+        - path: /*
+          name: X-XSS-Protection
+          value: "1; mode=block"
+        - path: /*
+          name: Cache-Control
+          value: public, max-age=3600
+
+  # Tile Server (pg_tileserv)
+  - type: web
+    name: vmhlss-tiles
+    plan: standard
+    region: oregon
+    runtime: docker
+    repo: https://github.com/vanuatu-dss/vmhlss
+    branch: main
+    dockerfilePath: ./Dockerfile.tileserv
+    buildCommand: echo "Build complete"
+    startCommand: /usr/local/bin/pg_tileserv
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          name: vmhlss-db
+          property: connectionString
+      - key: TS_LOGLEVEL
+        value: info
+      - key: TS_PORT
+        value: 8080
+      - key: TS_SERVERNAME
+        value: vmhlss-tiles.onrender.com
+    autoDeploy: true
+
+  # Nginx Reverse Proxy (Optional, for production)
+  - type: web
+    name: vmhlss-proxy
+    plan: standard
+    region: oregon
+    runtime: docker
+    repo: https://github.com/vanuatu-dss/vmhlss
+    branch: main
+    dockerfilePath: ./Dockerfile.nginx
+    buildCommand: echo "Build complete"
+    startCommand: nginx -g "daemon off;"
+    envVars:
+      - key: UPSTREAM_BACKEND
+        fromService:
+          name: vmhlss-api
+          property: host
+      - key: UPSTREAM_FRONTEND
+        fromService:
+          name: vmhlss-frontend
+          property: host
+      - key: UPSTREAM_TILES
+        fromService:
+          name: vmhlss-tiles
+          property: host
+    autoDeploy: true
+    routes:
+      - path: /api/*
+        service: vmhlss-api
+      - path: /tiles/*
+        service: vmhlss-tiles
+      - path: /*
+        service: vmhlss-frontend
