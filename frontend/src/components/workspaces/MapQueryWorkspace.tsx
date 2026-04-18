@@ -21,8 +21,9 @@ export default function MapQueryWorkspace() {
   const [popupContent, setPopupContent] = useState<any>(null);
   const [popupPosition, setPopupPosition] = useState<[number, number] | null>(null);
 
-  // OSM layers — fetched from Overpass API and added to map automatically
-  const osmStatus = useOSMLayers(map.current, mapLoaded);
+  // OSM layers — pass the ref object (not map.current) so the hook reads the current value
+  // when mapLoaded triggers, rather than the null value captured at render time
+  const osmStatus = useOSMLayers(map, mapLoaded);
 
   const { language } = useAuthStore();
   const { t } = useTranslation(language);
