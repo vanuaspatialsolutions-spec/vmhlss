@@ -240,3 +240,6 @@ reports/
 .env.dev
 .env.test
 .env.prod
+
+# Allow pre-bundled GeoJSON data in frontend/public/data/
+!frontend/public/data/*.geojson
