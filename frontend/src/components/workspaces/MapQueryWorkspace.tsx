@@ -192,7 +192,8 @@ export default function MapQueryWorkspace() {
       const feature = e.features?.[0];
       if (feature) {
         setPopupContent(feature.properties);
-        setPopupPosition(e.lngLat.toArray() as [number, number]);
+        // Use screen pixel coordinates for popup placement
+        setPopupPosition([e.point.x, e.point.y]);
       }
     });
 

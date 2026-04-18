@@ -50,8 +50,8 @@ export default function ResultsPopup({ position, content }: ResultsPopupProps) {
     <div
       className="absolute bg-white rounded-lg shadow-lg border-l-4 p-4 max-w-xs z-50"
       style={{
-        left: `${(position[0] - (-15.376)) * 1000}px`,
-        top: `${(position[1] - 166.959) * 1000}px`,
+        left: `${Math.min(position[0] + 12, window.innerWidth - 320)}px`,
+        top: `${Math.min(position[1] - 20, window.innerHeight - 300)}px`,
         borderLeftColor: color,
       }}
     >

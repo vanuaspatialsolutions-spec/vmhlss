@@ -228,9 +228,9 @@ interface MapStore {
 }
 
 export const useMapStore = create<MapStore>((set) => ({
-  mapCenter: [-15.376, 166.959],
+  mapCenter: [166.959, -15.376], // [lng, lat] — Vanuatu (MapLibre expects lng first)
   mapZoom: 7,
-  baseMap: 'satellite',
+  baseMap: 'osm',
   aoiGeometry: null,
 
   setMapCenter: (center) => set({ mapCenter: center }),
