@@ -379,16 +379,61 @@ export default function MapQueryWorkspace() {
 
 // Helper functions
 function getMapStyle(baseMap: string): string {
-  // For demo, use MapLibre OSM style
-  // In production, use proper URLs from Mapbox or Maptiler
-  const styles: Record<string, string> = {
-    satellite:
-      'https://api.maptiler.com/maps/satellite/style.json?key=YOUR_KEY',
-    osm: 'https://api.maptiler.com/maps/openstreetmap/style.json?key=YOUR_KEY',
-    topographic:
-      'https://api.maptiler.com/maps/topo/style.json?key=YOUR_KEY',
+  // Free, no-key-required styles via MapLibre demo tiles and OSM
+  const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || '';
+  if (MAPTILER_KEY) {
+    const styles: Record<string, string> = {
+      satellite: `https://api.maptiler.com/maps/satellite/style.json?key=${MAPTILER_KEY}`,
+      osm: `https://api.maptiler.com/maps/openstreetmap/style.json?key=${MAPTILER_KEY}`,
+      topographic: `https://api.maptiler.com/maps/topo/style.json?key=${MAPTILER_KEY}`,
+    };
+    return styles[baseMap] || styles.osm;
+  }
+  // Fallback: free OSM raster style (no API key needed)
+  const freeStyles: Record<string, object> = {
+    osm: {
+      version: 8,
+      sources: {
+        osm: {
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors',
+          maxzoom: 19,
+        },
+      },
+      layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+    },
+    satellite: {
+      version: 8,
+      sources: {
+        esri: {
+          type: 'raster',
+          tiles: [
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          ],
+          tileSize: 256,
+          attribution: 'Tiles © Esri',
+          maxzoom: 19,
+        },
+      },
+      layers: [{ id: 'esri-satellite', type: 'raster', source: 'esri' }],
+    },
+    topographic: {
+      version: 8,
+      sources: {
+        topo: {
+          type: 'raster',
+          tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '© OpenTopoMap contributors',
+          maxzoom: 17,
+        },
+      },
+      layers: [{ id: 'topo', type: 'raster', source: 'topo' }],
+    },
   };
-  return styles[baseMap] || styles.osm;
+  return JSON.stringify(freeStyles[baseMap] || freeStyles.osm);
 }
 
 function addHazardLayers(map: MapLibreMap) {
