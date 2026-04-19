@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore, useUIStore } from './store/index';
+import { login as localLogin, getStoredUser } from './services/localEngine';
 import MapQueryWorkspace from './components/workspaces/MapQueryWorkspace';
 import DataDashboard from './components/workspaces/DataDashboard';
 import DocumentWorkspace from './components/workspaces/DocumentWorkspace';
@@ -11,14 +12,22 @@ import StatusBar from './components/common/StatusBar';
 
 function App() {
   useUIStore(); // ensure store is initialized
+  const { setUser, setToken, isAuthenticated } = useAuthStore();
 
   useEffect(() => {
-    // Initialize auth check if needed
-    const token = useAuthStore.getState().token;
-    if (!token) {
-      console.log('No auth token found');
+    // Auto-authenticate with local VSS admin user — no server required
+    if (!isAuthenticated()) {
+      const stored = getStoredUser();
+      if (stored) {
+        setUser(stored);
+        setToken(`local-token-${Date.now()}`);
+      } else {
+        const { user, tokens } = localLogin({ email: 'admin@vss.vu', password: '' });
+        setUser(user);
+        setToken(tokens.accessToken);
+      }
     }
-  }, []);
+  }, [isAuthenticated, setUser, setToken]);
 
   return (
     <Router basename="/vmhlss">

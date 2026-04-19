@@ -264,14 +264,12 @@ export default function MapQueryWorkspace() {
     try {
       const analysis = await apiService.runAnalysis({
         aoi_geom: currentAoi,
-        assessment_type: assessmentType,
+        assessment_type: analysisId ? 'both' : assessmentType,
         personas_requested: personasRequested,
       });
       setAnalysis(analysis);
     } catch (error) {
       console.error('Analysis failed:', error);
-      // Demo mode: show a mock result so the UI responds
-      console.info(`Demo: would run "${analysisId || assessmentType}" analysis`);
     } finally {
       setIsProcessing(false);
     }

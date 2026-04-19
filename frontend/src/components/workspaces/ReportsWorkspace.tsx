@@ -48,59 +48,43 @@ export default function ReportsWorkspace() {
   const [selectedFormat, setSelectedFormat] = useState<'pdf' | 'html' | 'geojson' | 'csv'>('pdf');
 
   useEffect(() => {
-    // Load mock reports for demo
-    const mockReports: Report[] = [
-      {
-        id: 'report-1',
-        analysisId: currentAnalysis?.id || '',
-        type: 'suitability_summary',
-        format: 'pdf',
-        title: 'Suitability Summary - March 2024',
-        status: 'completed',
-        generatedAt: new Date().toISOString(),
-        generatedBy: 'demo-user',
-        pageCount: 24,
-      },
-    ];
-    setReports(mockReports);
-  }, [currentAnalysis?.id]);
+    const load = () => { /* placeholder */ };
+    // Load persisted reports from local engine
+    import('../../services/localEngine').then(({ getReports }) => {
+      setReports(getReports());
+    });
+    const handler = () => {
+      import('../../services/localEngine').then(({ getReports }) => setReports(getReports()));
+    };
+    window.addEventListener('vmhlss:reports', handler);
+    return () => window.removeEventListener('vmhlss:reports', handler);
+    void load;
+  }, []);
 
   const handleGenerateReport = async (reportType: string) => {
-    if (!currentAnalysis) {
-      alert('Please run an analysis first');
+    // Generate against latest analysis in history, or current
+    const { getAnalysisHistory } = await import('../../services/localEngine');
+    const history = getAnalysisHistory();
+    const target = currentAnalysis ?? history[0];
+    if (!target) {
+      alert('Run an analysis on the Map & Query tab first, then come back to generate a report.');
       return;
     }
-
     setGenerating(reportType);
-
     try {
-      const report = await apiService.generateReport(
-        currentAnalysis.id,
-        reportType,
-        selectedFormat
-      );
-      setReports((prev) => [report, ...prev]);
-    } catch (error) {
-      console.error('Report generation failed:', error);
-      alert('Failed to generate report');
+      const report = await apiService.generateReport(target.id, reportType, selectedFormat);
+      setReports(prev => [report, ...prev]);
+    } catch (err) {
+      console.error('Report generation failed:', err);
     } finally {
       setGenerating(null);
     }
   };
 
   const handleDownloadReport = async (reportId: string) => {
-    try {
-      const blob = await apiService.downloadReport(reportId);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `report-${reportId}.pdf`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Download failed:', error);
-      alert('Failed to download report');
-    }
+    const { getReports, downloadReport } = await import('../../services/localEngine');
+    const report = getReports().find(r => r.id === reportId);
+    if (report) downloadReport(report as Report & { htmlContent?: string });
   };
 
   return (
