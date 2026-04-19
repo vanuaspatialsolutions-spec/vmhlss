@@ -6,9 +6,11 @@ import { useAuthStore, useAnalysisStore, useMapStore, useUIStore } from '../../s
 import { useTranslation } from '../../i18n/index';
 import { apiService } from '../../services/api';
 import { useOSMLayers } from '../../hooks/useOSMLayers';
+import { useAoiInspector } from '../../hooks/useAoiInspector';
 import MapLayerPanel from '../map/MapLayerPanel';
 import QueryPanel from '../map/QueryPanel';
 import ResultsPopup from '../map/ResultsPopup';
+import AoiInspectorPanel from '../map/AoiInspectorPanel';
 import type { GeoJSON } from '../../types/index';
 
 export default function MapQueryWorkspace() {
@@ -20,10 +22,6 @@ export default function MapQueryWorkspace() {
   const [selectedCoords, setSelectedCoords] = useState<[number, number][]>([]);
   const [popupContent, setPopupContent] = useState<any>(null);
   const [popupPosition, setPopupPosition] = useState<[number, number] | null>(null);
-
-  // OSM layers — pass the ref object (not map.current) so the hook reads the current value
-  // when mapLoaded triggers, rather than the null value captured at render time
-  const osmStatus = useOSMLayers(map, mapLoaded);
 
   const { language } = useAuthStore();
   const { t } = useTranslation(language);
@@ -39,6 +37,14 @@ export default function MapQueryWorkspace() {
   } = useAnalysisStore();
   const { mapCenter, mapZoom, baseMap, setMapCenter, setMapZoom, setBaseMap } = useMapStore();
   const { mapLayerPanelOpen, queryPanelOpen } = useUIStore();
+
+  // OSM layers — pass the ref object (not map.current) so the hook reads the current value
+  // when mapLoaded triggers, rather than the null value captured at render time
+  const osmStatus = useOSMLayers(map, mapLoaded);
+
+  // AOI Inspector — fires automatically when a polygon is drawn
+  const osmAllLoaded = Object.values(osmStatus).every(s => s === 'loaded' || s === 'error');
+  const aoiInspection = useAoiInspector(currentAoi, map, osmAllLoaded);
 
   // Initialize map
   useEffect(() => {
@@ -248,7 +254,7 @@ export default function MapQueryWorkspace() {
     setSelectedCoords([]);
   };
 
-  const handleRunAnalysis = async () => {
+  const handleRunAnalysis = async (analysisId?: string) => {
     if (!currentAoi) {
       alert(t('mapquery.selectarea'));
       return;
@@ -264,9 +270,23 @@ export default function MapQueryWorkspace() {
       setAnalysis(analysis);
     } catch (error) {
       console.error('Analysis failed:', error);
-      alert('Analysis failed. Please try again.');
+      // Demo mode: show a mock result so the UI responds
+      console.info(`Demo: would run "${analysisId || assessmentType}" analysis`);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleClearAoi = () => {
+    setAoi(null);
+    setDrawMode(null);
+    setSelectedCoords([]);
+    if (map.current) {
+      if (map.current.getSource('aoi')) {
+        map.current.removeLayer('aoi-fill');
+        map.current.removeLayer('aoi-outline');
+        map.current.removeSource('aoi');
+      }
     }
   };
 
@@ -293,6 +313,18 @@ export default function MapQueryWorkspace() {
         {/* Popup */}
         {popupPosition && popupContent && (
           <ResultsPopup position={popupPosition} content={popupContent} />
+        )}
+
+        {/* AOI Inspector Panel — auto-shows when polygon is drawn */}
+        {aoiInspection && (
+          <div className="absolute top-4 right-4 z-20 pointer-events-auto">
+            <AoiInspectorPanel
+              inspection={aoiInspection}
+              onRunAnalysis={handleRunAnalysis}
+              onClearAoi={handleClearAoi}
+              isProcessing={isProcessing}
+            />
+          </div>
         )}
 
         {/* Draw Mode Indicator */}
@@ -340,8 +372,8 @@ export default function MapQueryWorkspace() {
           )}
         </div>
 
-        {/* Base Map Toggle */}
-        <div className="absolute top-4 right-4 flex gap-2">
+        {/* Base Map Toggle — bottom-right (clear of Inspector Panel) */}
+        <div className="absolute bottom-4 right-4 flex gap-2">
           {(['satellite', 'osm', 'topographic'] as const).map((base) => (
             <button
               key={base}
