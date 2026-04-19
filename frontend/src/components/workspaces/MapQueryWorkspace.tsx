@@ -143,73 +143,98 @@ export default function MapQueryWorkspace() {
     map.current.fitBounds(bounds, { padding: 50 });
   }, [currentAoi]);
 
-  // Display results on map
+  // Display results on map — triggered when analysis completes
   useEffect(() => {
-    if (!map.current || !currentAnalysis?.results) return;
+    if (!map.current || !mapLoaded || !currentAnalysis?.results?.length) return;
 
-    // Remove existing results layer
-    if (map.current.getSource('results')) {
-      map.current.removeLayer('results-fill');
-      map.current.removeSource('results');
-    }
+    const m = map.current;
 
-    // Create GeoJSON from results
+    // Remove any previous results layers
+    ['results-halo', 'results-fill', 'results-label'].forEach(id => {
+      if (m.getLayer(id)) m.removeLayer(id);
+    });
+    if (m.getSource('results')) m.removeSource('results');
+
     const geojson: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: currentAnalysis.results.map((result) => ({
-        type: 'Feature',
+        type: 'Feature' as const,
         geometry: result.geometry,
         properties: {
           suitabilityClass: result.suitabilityClass,
           chiScore: result.chiScore,
           confidence: result.confidence,
-          topHazards: result.topHazards,
+          label: result.suitabilityClass,
         },
       })),
     };
 
-    map.current.addSource('results', {
-      type: 'geojson',
-      data: geojson,
+    m.addSource('results', { type: 'geojson', data: geojson as unknown as object });
+
+    // White halo for visibility over basemap
+    m.addLayer({
+      id: 'results-halo',
+      type: 'circle',
+      source: 'results',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 18],
+        'circle-color': '#ffffff',
+        'circle-opacity': 0.5,
+      },
     });
 
-    map.current.addLayer({
+    // Coloured fill by suitability class
+    m.addLayer({
       id: 'results-fill',
       type: 'circle',
       source: 'results',
       paint: {
-        'circle-radius': 6,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 7, 14, 14],
         'circle-color': [
-          'match',
-          ['get', 'suitabilityClass'],
-          'S1',
-          '#1a5c30',
-          'S2',
-          '#4aa040',
-          'S3',
-          '#c8a000',
-          'S4',
-          '#c85000',
-          'S5',
-          '#8b2000',
-          '#1a1a1a',
+          'match', ['get', 'suitabilityClass'],
+          'S1', '#166534',
+          'S2', '#16a34a',
+          'S3', '#ca8a04',
+          'S4', '#ea580c',
+          'S5', '#991b1b',
+          '#6b7280',
         ],
-        'circle-opacity': 0.8,
+        'circle-opacity': 0.9,
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff',
       },
     });
 
-    // Add click handler
-    map.current.on('click', 'results-fill', (e: MapMouseEvent) => {
+    // Class label at higher zoom
+    m.addLayer({
+      id: 'results-label',
+      type: 'symbol',
+      source: 'results',
+      minzoom: 11,
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-size': 10,
+        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+        'text-offset': [0, -1.4],
+      },
+      paint: {
+        'text-color': '#1f2937',
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 1,
+      },
+    });
+
+    // Click handler — show popup
+    m.on('click', 'results-fill', (e: MapMouseEvent) => {
       const feature = e.features?.[0];
       if (feature) {
         setPopupContent(feature.properties);
-        // Use screen pixel coordinates for popup placement
         setPopupPosition([e.point.x, e.point.y]);
       }
     });
-
-    map.current.getCanvas().style.cursor = 'pointer';
-  }, [currentAnalysis]);
+    m.on('mouseenter', 'results-fill', () => { m.getCanvas().style.cursor = 'pointer'; });
+    m.on('mouseleave', 'results-fill', () => { m.getCanvas().style.cursor = ''; });
+  }, [currentAnalysis, mapLoaded]);
 
   const startDraw = (mode: 'polygon' | 'rectangle') => {
     setDrawMode(mode);
@@ -313,8 +338,8 @@ export default function MapQueryWorkspace() {
           <ResultsPopup position={popupPosition} content={popupContent} />
         )}
 
-        {/* AOI Inspector Panel — auto-shows when polygon is drawn */}
-        {aoiInspection && (
+        {/* AOI Inspector Panel — auto-shows when polygon drawn, hidden once results appear */}
+        {aoiInspection && !currentAnalysis && (
           <div className="absolute top-4 right-4 z-20 pointer-events-auto">
             <AoiInspectorPanel
               inspection={aoiInspection}
@@ -322,6 +347,90 @@ export default function MapQueryWorkspace() {
               onClearAoi={handleClearAoi}
               isProcessing={isProcessing}
             />
+          </div>
+        )}
+
+        {/* Results Summary Panel — replaces AOI inspector after analysis */}
+        {currentAnalysis?.results?.length && (
+          <div className="absolute top-4 right-4 z-20 pointer-events-auto w-72">
+            <div className="bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-green-700 to-green-600 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-white font-bold text-sm">✅ Analysis Complete</h3>
+                    <p className="text-green-200 text-xs mt-0.5">
+                      {currentAnalysis.results.length} grid points classified
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setAnalysis(null as unknown as typeof currentAnalysis); }}
+                    className="text-green-300 hover:text-white text-xs border border-green-500 hover:border-white rounded px-2 py-0.5 transition-colors"
+                  >
+                    ✕ Clear
+                  </button>
+                </div>
+              </div>
+
+              {/* Class breakdown */}
+              <div className="px-4 py-3 border-b border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Suitability Classification</p>
+                <div className="space-y-1.5">
+                  {([
+                    { cls: 'S1', label: 'Highly Suitable',    color: '#166534', bg: '#dcfce7' },
+                    { cls: 'S2', label: 'Moderately Suitable', color: '#16a34a', bg: '#bbf7d0' },
+                    { cls: 'S3', label: 'Marginally Suitable', color: '#ca8a04', bg: '#fef9c3' },
+                    { cls: 'S4', label: 'Currently Unsuitable',color: '#ea580c', bg: '#ffedd5' },
+                    { cls: 'S5', label: 'Permanently Unsuitable',color:'#991b1b', bg: '#fee2e2' },
+                  ] as const).map(({ cls, label: _label, color, bg }) => {
+                    const count = currentAnalysis.results!.filter(r => r.suitabilityClass === cls).length;
+                    const pct = Math.round((count / currentAnalysis.results!.length) * 100);
+                    if (count === 0) return null;
+                    return (
+                      <div key={cls} className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-6 text-center rounded px-0.5" style={{ color, background: bg }}>{cls}</span>
+                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+                        </div>
+                        <span className="text-xs text-gray-500 w-12 text-right">{count} ({pct}%)</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Suitability class legend */}
+              <div className="px-4 py-2 border-b border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Legend</p>
+                <div className="flex gap-2 flex-wrap">
+                  {(['S1','S2','S3','S4','S5'] as const).map((cls, i) => {
+                    const colors = ['#166534','#16a34a','#ca8a04','#ea580c','#991b1b'];
+                    return (
+                      <div key={cls} className="flex items-center gap-1 text-xs text-gray-600">
+                        <span className="w-3 h-3 rounded-full border border-white shadow-sm" style={{ background: colors[i] }} />
+                        {cls}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Generate Report CTA */}
+              <div className="px-4 py-3 bg-gray-50 flex flex-col gap-2">
+                <button
+                  onClick={() => navigate('/reports')}
+                  className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  📄 Generate Report
+                </button>
+                <button
+                  onClick={handleClearAoi}
+                  className="w-full py-1.5 px-4 bg-white text-gray-600 border border-gray-300 rounded-lg text-xs font-medium hover:bg-gray-100 transition-all"
+                >
+                  Draw New Area
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { useAuthStore, useAnalysisStore } from '../../store/index';
 import { useTranslation } from '../../i18n/index';
 import { apiService } from '../../services/api';
 import type { Report } from '../../types/index';
+import { useNavigate } from 'react-router-dom';
 
 const reportTypes = [
   {
@@ -43,6 +44,7 @@ export default function ReportsWorkspace() {
   const { language } = useAuthStore();
   const { t: _t } = useTranslation(language);
   const { currentAnalysis } = useAnalysisStore();
+  const navigate = useNavigate();
   const [reports, setReports] = useState<Report[]>([]);
   const [generating, setGenerating] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<'pdf' | 'html' | 'geojson' | 'csv'>('pdf');
@@ -62,17 +64,10 @@ export default function ReportsWorkspace() {
   }, []);
 
   const handleGenerateReport = async (reportType: string) => {
-    // Generate against latest analysis in history, or current
-    const { getAnalysisHistory } = await import('../../services/localEngine');
-    const history = getAnalysisHistory();
-    const target = currentAnalysis ?? history[0];
-    if (!target) {
-      alert('Run an analysis on the Map & Query tab first, then come back to generate a report.');
-      return;
-    }
+    if (!currentAnalysis) return; // gate enforced by early-return render below
     setGenerating(reportType);
     try {
-      const report = await apiService.generateReport(target.id, reportType, selectedFormat);
+      const report = await apiService.generateReport(currentAnalysis.id, reportType, selectedFormat);
       setReports(prev => [report, ...prev]);
     } catch (err) {
       console.error('Report generation failed:', err);
@@ -98,17 +93,45 @@ export default function ReportsWorkspace() {
           </p>
         </div>
 
-        {/* Analysis Status */}
+        {/* Gate: require a completed analysis before showing report tools */}
         {!currentAnalysis && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p className="text-sm font-medium text-yellow-900">
-              ⚠️ No analysis available. Run an analysis first to generate reports.
-            </p>
+          <div className="flex flex-col items-center justify-center py-24 text-center space-y-6">
+            <div className="text-6xl">🗺️</div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                No Analysis Results Yet
+              </h2>
+              <p className="text-gray-600 max-w-md">
+                Run a spatial analysis on the <strong>Map &amp; Query</strong> tab first.
+                Draw your area of interest, choose analysis parameters, then come back here
+                to generate reports from your results.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate('/map')}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-md"
+            >
+              <span>→</span> Go to Map &amp; Query
+            </button>
           </div>
         )}
 
         {currentAnalysis && (
           <>
+            {/* Active analysis banner */}
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-3">
+              <span className="text-green-600 text-lg">✅</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-green-800 truncate">
+                  Analysis ready: {currentAnalysis.name ?? currentAnalysis.id}
+                </p>
+                <p className="text-xs text-green-700">
+                  {currentAnalysis.results?.length ?? 0} result points &middot;{' '}
+                  {new Date(currentAnalysis.createdAt).toLocaleString()}
+                </p>
+              </div>
+            </div>
+
             {/* Format Selection */}
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h2 className="text-lg font-bold text-gray-900 mb-4">Output Format</h2>
