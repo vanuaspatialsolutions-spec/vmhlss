@@ -1,7 +1,6 @@
 /**
  * useAoiInspector — when an AOI polygon is drawn, compute area stats
- * from the loaded OSM GIS layers and return ONLY the analyses that can
- * actually be generated for that specific location and its observable features.
+ * from the loaded OSM GIS layers and return all 12 available analyses.
  */
 
 import { useEffect, useState } from 'react';
@@ -16,11 +15,11 @@ import type { RefObject } from 'react';
 export interface AoiStats {
   areaSqKm: number;
   perimeterKm: number;
-  bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
-  buildings: number | null;   // count, null = data not loaded yet
-  roadKm: number | null;      // road length in km
-  waterwayKm: number | null;  // waterway length in km
-  parks: number | null;       // count
+  bbox: [number, number, number, number];
+  buildings: number | null;
+  roadKm: number | null;
+  waterwayKm: number | null;
+  parks: number | null;
 }
 
 export interface AvailableAnalysis {
@@ -29,158 +28,38 @@ export interface AvailableAnalysis {
   title: string;
   description: string;
   category: 'hazard' | 'suitability' | 'infrastructure' | 'environment';
-  available: boolean;
-  /** True while OSM data is still loading — availability not yet determined */
-  pending: boolean;
+  available: true;
+  pending: false;
   note?: string;
 }
 
 export interface AoiInspection {
   stats: AoiStats;
-  /** Only analyses that can genuinely be generated — unavailable ones are excluded */
   analyses: AvailableAnalysis[];
   osmLoading: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Vanuatu geography constants
+// All 12 analyses — always shown regardless of location or OSM features
 // ---------------------------------------------------------------------------
-
-/** Known active / frequently erupting volcanoes [lng, lat] */
-const ACTIVE_VOLCANOES: [number, number][] = [
-  [169.447, -19.532],  // Yasur, Tanna — permanently active
-  [167.500, -14.270],  // Gaua, Banks Islands
-  [167.833, -15.383],  // Ambae (Aoba)
-  [168.120, -16.250],  // Ambrym — twin-caldera, very active
-  [168.348, -16.508],  // Lopevi
-  [168.167, -17.017],  // Epi (Tavani Ruro)
-];
-
-/** Volcanic hazard zone radius km — includes ash fall, seismic amplification, lava flow */
-const VOLCANO_RADIUS_KM = 130;
-
-// ---------------------------------------------------------------------------
-// Full catalogue — availability is computed at runtime, not hardcoded
-// ---------------------------------------------------------------------------
-interface CatalogueEntry {
-  id: string;
-  icon: string;
-  title: string;
-  description: string;
-  category: AvailableAnalysis['category'];
-  /** 'always' | 'volcano' | 'coastal' | 'has-buildings' | 'has-roads' | 'has-waterways' */
-  requires: string[];
-}
-
-const CATALOGUE: CatalogueEntry[] = [
-  // Suitability — always available: the engine scores every point in Vanuatu
-  {
-    id: 'development-suitability',
-    icon: '🏗️',
-    title: 'Development Suitability',
-    description: 'Multi-criteria land suitability for urban and residential development',
-    category: 'suitability',
-    requires: [],
-  },
-  {
-    id: 'agriculture-suitability',
-    icon: '🌾',
-    title: 'Agricultural Suitability',
-    description: 'Soil, slope and climate suitability for farming and crops',
-    category: 'suitability',
-    requires: [],
-  },
-  // Hazards always present in Vanuatu
-  {
-    id: 'cyclone-risk',
-    icon: '🌀',
-    title: 'Cyclone Hazard Risk',
-    description: 'Historical cyclone track exposure and wind speed zones',
-    category: 'hazard',
-    requires: [],
-  },
-  {
-    id: 'flood-risk',
-    icon: '🌊',
-    title: 'Flood Risk Assessment',
-    description: 'River flood extent, coastal inundation and drainage analysis',
-    category: 'hazard',
-    requires: [],
-  },
-  {
-    id: 'earthquake-hazard',
-    icon: '📳',
-    title: 'Earthquake Hazard',
-    description: 'Seismic intensity, fault proximity and ground shaking potential',
-    category: 'hazard',
-    requires: [],
-  },
-  {
-    id: 'landslide-risk',
-    icon: '🏔️',
-    title: 'Landslide Risk',
-    description: 'Slope stability, soil saturation and mass movement susceptibility',
-    category: 'hazard',
-    requires: [],
-  },
-  // Volcanic — only near active volcanoes
-  {
-    id: 'volcanic-hazard',
-    icon: '🌋',
-    title: 'Volcanic Hazard',
-    description: 'Lava flow paths, ashfall extent and exclusion zone analysis',
-    category: 'hazard',
-    requires: ['volcano'],
-  },
-  // Coastal — only for areas near the coastline
-  {
-    id: 'tsunami-vulnerability',
-    icon: '🌊',
-    title: 'Tsunami Vulnerability',
-    description: 'Coastal run-up zones and population exposure mapping',
-    category: 'hazard',
-    requires: ['coastal'],
-  },
-  {
-    id: 'coastal-erosion',
-    icon: '🏝️',
-    title: 'Coastal Erosion',
-    description: 'Shoreline change rates and coastal retreat modelling',
-    category: 'environment',
-    requires: ['coastal'],
-  },
-  // Infrastructure — only if OSM shows roads or buildings
-  {
-    id: 'infrastructure-assessment',
-    icon: '🛣️',
-    title: 'Infrastructure Assessment',
-    description: 'Road access, building density and utility coverage analysis',
-    category: 'infrastructure',
-    requires: ['has-roads-or-buildings'],
-  },
-  {
-    id: 'building-vulnerability',
-    icon: '🏚️',
-    title: 'Building Vulnerability',
-    description: 'Structural exposure and damage probability for existing buildings',
-    category: 'infrastructure',
-    requires: ['has-buildings'],
-  },
-  // Environment — always available in Vanuatu
-  {
-    id: 'biodiversity',
-    icon: '🦜',
-    title: 'Biodiversity & Conservation',
-    description: 'Habitat sensitivity, protected areas and ecological connectivity',
-    category: 'environment',
-    requires: [],
-  },
+const CATALOGUE: AvailableAnalysis[] = [
+  { id: 'development-suitability',   icon: '🏗️', title: 'Development Suitability',    description: 'Multi-criteria land suitability for urban and residential development',    category: 'suitability',    available: true, pending: false },
+  { id: 'agriculture-suitability',   icon: '🌾', title: 'Agricultural Suitability',   description: 'Soil, slope and climate suitability for farming and crops',                category: 'suitability',    available: true, pending: false },
+  { id: 'cyclone-risk',              icon: '🌀', title: 'Cyclone Hazard Risk',         description: 'Historical cyclone track exposure and wind speed zones',                   category: 'hazard',         available: true, pending: false },
+  { id: 'flood-risk',                icon: '🌊', title: 'Flood Risk Assessment',       description: 'River flood extent, coastal inundation and drainage analysis',             category: 'hazard',         available: true, pending: false },
+  { id: 'tsunami-vulnerability',     icon: '🌊', title: 'Tsunami Vulnerability',       description: 'Coastal run-up zones and population exposure mapping',                     category: 'hazard',         available: true, pending: false },
+  { id: 'earthquake-hazard',         icon: '📳', title: 'Earthquake Hazard',           description: 'Seismic intensity, fault proximity and ground shaking potential',          category: 'hazard',         available: true, pending: false },
+  { id: 'volcanic-hazard',           icon: '🌋', title: 'Volcanic Hazard',             description: 'Lava flow paths, ashfall extent and exclusion zone analysis',              category: 'hazard',         available: true, pending: false },
+  { id: 'landslide-risk',            icon: '🏔️', title: 'Landslide Risk',              description: 'Slope stability, soil saturation and mass movement susceptibility',        category: 'hazard',         available: true, pending: false },
+  { id: 'infrastructure-assessment', icon: '🛣️', title: 'Infrastructure Assessment',   description: 'Road access, building density and utility coverage analysis',              category: 'infrastructure', available: true, pending: false },
+  { id: 'building-vulnerability',    icon: '🏚️', title: 'Building Vulnerability',      description: 'Structural exposure and damage probability for existing buildings',        category: 'infrastructure', available: true, pending: false },
+  { id: 'coastal-erosion',           icon: '🏝️', title: 'Coastal Erosion',             description: 'Shoreline change rates and coastal retreat modelling',                     category: 'environment',    available: true, pending: false },
+  { id: 'biodiversity',              icon: '🦜', title: 'Biodiversity & Conservation', description: 'Habitat sensitivity, protected areas and ecological connectivity',         category: 'environment',    available: true, pending: false },
 ];
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------
-
 function ringPerimeterKm(coords: [number, number][]): number {
   const R = 6371;
   let total = 0;
@@ -229,44 +108,6 @@ function lineStringLengthKm(coords: [number, number][]): number {
 }
 
 // ---------------------------------------------------------------------------
-// Geographic context evaluators
-// ---------------------------------------------------------------------------
-
-/**
- * True if the AOI center is within VOLCANO_RADIUS_KM of any active volcano.
- */
-function checkNearVolcano(center: [number, number]): boolean {
-  return ACTIVE_VOLCANOES.some(v => distKm(center, v) < VOLCANO_RADIUS_KM);
-}
-
-/**
- * True if the AOI is in a coastal zone.
- *
- * All Vanuatu land is on islands. The only significantly "inland" zone
- * is the deep interior of Espiritu Santo (roughly 166.75–167.15 °E,
- * 14.6–16.0 °S) where some points are >20 km from the coast.
- * Everywhere else in the archipelago is within 15 km of saltwater.
- */
-function checkIsCoastal(center: [number, number], bbox: [number, number, number, number]): boolean {
-  const [lng, lat] = center;
-
-  // Santo interior exclusion zone
-  const inSantoInterior =
-    lng >= 166.75 && lng <= 167.15 &&
-    lat >= -16.0  && lat <= -14.6;
-
-  if (inSantoInterior) {
-    // The AOI may still touch the coast — check if the bbox is wide enough
-    // to span the interior (i.e. straddles a coastline)
-    const bboxWidthKm = distKm([bbox[0], lat], [bbox[2], lat]);
-    if (bboxWidthKm > 15) return true; // large AOI likely spans to coast
-    return false;
-  }
-
-  return true; // everywhere else in Vanuatu is coastal
-}
-
-// ---------------------------------------------------------------------------
 // OSM feature counting
 // ---------------------------------------------------------------------------
 function countFeaturesInAoi(
@@ -309,79 +150,9 @@ function countFeaturesInAoi(
           if (pointInPolygon([lng, lat], ring)) count++;
       }
     }
-  } catch { /* source not ready */ }
+  } catch { /* source may not be ready */ }
 
   return { count, lengthKm };
-}
-
-// ---------------------------------------------------------------------------
-// Availability evaluator
-// ---------------------------------------------------------------------------
-interface OsmCounts {
-  buildings: number | null;
-  roadKm: number | null;
-  waterwayKm: number | null;
-  parks: number | null;
-}
-
-function evaluateAvailability(
-  entry: CatalogueEntry,
-  geo: { nearVolcano: boolean; coastal: boolean },
-  osm: OsmCounts,
-  osmLoaded: boolean,
-): AvailableAnalysis | null {
-  let available = true;
-  let pending = false;
-  let note: string | undefined;
-
-  for (const req of entry.requires) {
-    switch (req) {
-      case 'volcano':
-        if (!geo.nearVolcano) return null; // hide entirely
-        break;
-
-      case 'coastal':
-        if (!geo.coastal) return null; // hide entirely
-        break;
-
-      case 'has-buildings':
-        if (!osmLoaded) {
-          pending = true; // we don't know yet — show as loading
-        } else if ((osm.buildings ?? 0) === 0) {
-          return null; // no buildings → hide entirely
-        }
-        break;
-
-      case 'has-roads-or-buildings':
-        if (!osmLoaded) {
-          pending = true;
-        } else if ((osm.roadKm ?? 0) === 0 && (osm.buildings ?? 0) === 0) {
-          return null;
-        }
-        break;
-
-      case 'has-waterways':
-        if (!osmLoaded) {
-          pending = true;
-        } else if ((osm.waterwayKm ?? 0) === 0) {
-          return null;
-        }
-        break;
-    }
-  }
-
-  if (!available) return null;
-
-  return {
-    id:          entry.id,
-    icon:        entry.icon,
-    title:       entry.title,
-    description: entry.description,
-    category:    entry.category,
-    available,
-    pending,
-    note,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -398,65 +169,39 @@ export function useAoiInspector(
     if (!aoi) { setInspection(null); return; }
 
     const polygon = { type: 'Feature', geometry: aoi, properties: {} } as GeoJSON.Feature<GeoJSON.Polygon>;
-    const areaSqKm = turfArea(polygon) / 1_000_000;
-    const bbox = turfBbox(polygon) as [number, number, number, number];
-    const ring = aoi.coordinates[0] as [number, number][];
+    const areaSqKm   = turfArea(polygon) / 1_000_000;
+    const bbox       = turfBbox(polygon) as [number, number, number, number];
+    const ring       = aoi.coordinates[0] as [number, number][];
     const perimeterKm = ringPerimeterKm(ring);
 
-    // AOI centre point
-    const center: [number, number] = [
-      (bbox[0] + bbox[2]) / 2,
-      (bbox[1] + bbox[3]) / 2,
-    ];
+    // Show all 12 analyses immediately with geometry stats
+    setInspection({
+      stats: { areaSqKm, perimeterKm, bbox, buildings: null, roadKm: null, waterwayKm: null, parks: null },
+      analyses: CATALOGUE,
+      osmLoading: true,
+    });
 
-    // Geographic context (instant, no data loading needed)
-    const geo = {
-      nearVolcano: checkNearVolcano(center),
-      coastal:     checkIsCoastal(center, bbox),
-    };
+    // Enrich OSM counts once layers are ready
+    if (mapRef.current && osmLayersLoaded) {
+      const m = mapRef.current;
+      const bldg  = countFeaturesInAoi(m, 'osm-buildings',  aoi);
+      const road  = countFeaturesInAoi(m, 'osm-roads',      aoi);
+      const water = countFeaturesInAoi(m, 'osm-waterways',  aoi);
+      const park  = countFeaturesInAoi(m, 'osm-parks',      aoi);
 
-    // Base OSM counts (unknown until layers load)
-    const baseOsm: OsmCounts = { buildings: null, roadKm: null, waterwayKm: null, parks: null };
-
-    function buildInspection(osm: OsmCounts, osmLoaded: boolean): AoiInspection {
-      const analyses = CATALOGUE
-        .map(e => evaluateAvailability(e, geo, osm, osmLoaded))
-        .filter((a): a is AvailableAnalysis => a !== null);
-
-      return {
+      setInspection({
         stats: {
           areaSqKm,
           perimeterKm,
           bbox,
-          buildings:   osm.buildings,
-          roadKm:      osm.roadKm,
-          waterwayKm:  osm.waterwayKm,
-          parks:       osm.parks,
+          buildings:  bldg.count,
+          roadKm:     Math.round(road.lengthKm  * 10) / 10,
+          waterwayKm: Math.round(water.lengthKm * 10) / 10,
+          parks:      park.count,
         },
-        analyses,
-        osmLoading: !osmLoaded,
-      };
-    }
-
-    // Immediate render with geographic-only filtering
-    setInspection(buildInspection(baseOsm, false));
-
-    // Enrich once OSM data is ready
-    if (mapRef.current && osmLayersLoaded) {
-      const m = mapRef.current;
-      const bldg = countFeaturesInAoi(m, 'osm-buildings', aoi);
-      const road = countFeaturesInAoi(m, 'osm-roads', aoi);
-      const water = countFeaturesInAoi(m, 'osm-waterways', aoi);
-      const park = countFeaturesInAoi(m, 'osm-parks', aoi);
-
-      const enriched: OsmCounts = {
-        buildings:  bldg.count,
-        roadKm:     Math.round(road.lengthKm * 10) / 10,
-        waterwayKm: Math.round(water.lengthKm * 10) / 10,
-        parks:      park.count,
-      };
-
-      setInspection(buildInspection(enriched, true));
+        analyses: CATALOGUE,
+        osmLoading: false,
+      });
     }
   }, [aoi, osmLayersLoaded]);
 

@@ -325,60 +325,88 @@ export async function processUpload(
 // ---------------------------------------------------------------------------
 type AnalysisRecord = Analysis & { _stored: true };
 
+/** Ray-casting point-in-polygon */
+function pipTest(pt: [number, number], ring: [number, number][]): boolean {
+  const [x, y] = pt;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
 function scoreArea(aoi: GeoJSON.Polygon): Analysis {
-  // Compute bbox
-  const coords = aoi.coordinates[0] as [number, number][];
-  const lngs = coords.map(c => c[0]);
-  const lats = coords.map(c => c[1]);
-  const cLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
-  const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const ring = aoi.coordinates[0] as [number, number][];
+  const lngs = ring.map(c => c[0]);
+  const lats = ring.map(c => c[1]);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const cLng = (minLng + maxLng) / 2;
+  const cLat = (minLat + maxLat) / 2;
 
-  // Approximate area in km²
-  const R = 6371;
-  const dLat = (Math.max(...lats) - Math.min(...lats)) * Math.PI / 180;
-  const dLng = (Math.max(...lngs) - Math.min(...lngs)) * Math.PI / 180;
-  const areaKm2 = R * R * dLat * dLng * Math.cos(cLat * Math.PI / 180);
-
-  // Simple scoring based on latitude/longitude proximity to known zones
-  // Efate (most developed): -17.7, 168.3
-  // North Vanuatu (volcanic): -15.3, 167.2
-  // Santo (agricultural): -15.4, 167.1
-  const distToEfate = Math.sqrt((cLat + 17.7) ** 2 + (cLng - 168.3) ** 2);
-  const distToVolcano = Math.sqrt((cLat + 15.9) ** 2 + (cLng - 168.35) ** 2); // Yasur area
-
-  // Suitability classes
-  const devScore = Math.max(0, 100 - distToEfate * 25);
-  const hazardScore = Math.min(100, distToVolcano * 30 + 20);
+  // Scoring based on position relative to known Vanuatu zones
+  const distToEfate   = Math.sqrt((cLat + 17.7) ** 2 + (cLng - 168.3)  ** 2);
+  const distToVolcano = Math.sqrt((cLat + 15.9) ** 2 + (cLng - 168.35) ** 2);
+  const devScore   = Math.max(0,   100 - distToEfate   * 25);
+  const hazardScore = Math.min(100, distToVolcano * 30  + 20);
 
   const hazardList: HazardFactor[] = hazardScore > 60
     ? [
-        { name: 'Cyclone', severity: hazardScore / 100, impact: 'high' as const },
-        { name: 'Flood', severity: 0.6, impact: 'high' as const },
+        { name: 'Cyclone',  severity: hazardScore / 100, impact: 'high'   as const },
+        { name: 'Flood',    severity: 0.6,               impact: 'high'   as const },
         { name: distToVolcano < 1.5 ? 'Volcanic' : 'Landslide', severity: 0.5, impact: 'medium' as const },
       ]
     : [
-        { name: 'Flood', severity: 0.4, impact: 'medium' as const },
-        { name: 'Earthquake', severity: 0.3, impact: 'low' as const },
+        { name: 'Flood',      severity: 0.4, impact: 'medium' as const },
+        { name: 'Earthquake', severity: 0.3, impact: 'low'    as const },
       ];
 
-  // Generate result grid
-  const gridCount = Math.max(1, Math.min(Math.ceil(areaKm2 / 0.25), 50));
-  const results = Array.from({ length: gridCount }, (_, i) => {
-    const angle = (i / gridCount) * Math.PI * 2;
-    const spread = Math.min(Math.sqrt(areaKm2) * 0.008, 0.05);
-    const lng = cLng + Math.cos(angle) * spread * (0.5 + Math.random() * 0.5);
-    const lat = cLat + Math.sin(angle) * spread * (0.5 + Math.random() * 0.5);
-    const localDev = Math.max(0, devScore + (Math.random() - 0.5) * 30);
+  // ── Generate a regular grid across the AOI bbox, keep only points inside ──
+  // Target ~40 classified points; oversample the grid to account for polygon
+  // coverage being less than the full bbox.
+  const TARGET = 40;
+  const bboxRatio = Math.max(
+    (maxLng - minLng) / ((maxLat - minLat) || 1e-6),
+    1e-6
+  );
+  // Aspect-correct grid dimensions
+  const cols = Math.max(3, Math.round(Math.sqrt(TARGET * bboxRatio)));
+  const rows = Math.max(3, Math.round(TARGET / cols));
+
+  const gridPoints: [number, number][] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      // Place point at cell centre with small random jitter (±30 % of cell size)
+      const lng = minLng + (c + 0.5 + (Math.random() - 0.5) * 0.6) * (maxLng - minLng) / cols;
+      const lat = minLat + (r + 0.5 + (Math.random() - 0.5) * 0.6) * (maxLat - minLat) / rows;
+      if (pipTest([lng, lat], ring)) gridPoints.push([lng, lat]);
+    }
+  }
+
+  // Always include the centroid so there is at least one point
+  if (!gridPoints.length) gridPoints.push([cLng, cLat]);
+
+  const results = gridPoints.map(([lng, lat], i) => {
+    // Score varies slightly per grid cell (spatial heterogeneity)
+    const localDev = Math.max(0, Math.min(100,
+      devScore + (Math.random() - 0.5) * 40
+    ));
     const cls =
-      localDev > 70 ? 'S1' : localDev > 50 ? 'S2' : localDev > 30 ? 'S3' : localDev > 15 ? 'S4' : 'S5';
+      localDev > 70 ? 'S1'
+      : localDev > 50 ? 'S2'
+      : localDev > 30 ? 'S3'
+      : localDev > 15 ? 'S4'
+      : 'S5';
     return {
-      cellId: `cell-${i}`,
-      geometry: { type: 'Point' as const, coordinates: [lng, lat] },
+      cellId:           `cell-${i}`,
+      geometry:         { type: 'Point' as const, coordinates: [lng, lat] },
       suitabilityClass: cls as AnalysisResult['suitabilityClass'],
-      chiScore: Math.round(localDev),
-      confidence: 0.7 + Math.random() * 0.25,
-      topHazards: hazardList,
-      assessmentType: 'both' as AnalysisResult['assessmentType'],
+      chiScore:         Math.round(localDev),
+      confidence:       0.7 + Math.random() * 0.25,
+      topHazards:       hazardList,
+      assessmentType:   'both' as AnalysisResult['assessmentType'],
     };
   }) as AnalysisResult[];
 

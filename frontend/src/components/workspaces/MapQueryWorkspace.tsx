@@ -338,7 +338,7 @@ export default function MapQueryWorkspace() {
           <ResultsPopup position={popupPosition} content={popupContent} />
         )}
 
-        {/* AOI Inspector Panel — auto-shows when polygon drawn, hidden once results appear */}
+        {/* AOI Inspector — shown when AOI drawn AND no analysis yet */}
         {aoiInspection && !currentAnalysis && (
           <div className="absolute top-4 right-4 z-20 pointer-events-auto">
             <AoiInspectorPanel
@@ -350,73 +350,146 @@ export default function MapQueryWorkspace() {
           </div>
         )}
 
-        {/* Results Summary Panel — replaces AOI inspector after analysis */}
-        {currentAnalysis?.results?.length && (
-          <div className="absolute top-4 right-4 z-20 pointer-events-auto w-72">
-            <div className="bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
-              {/* Header */}
-              <div className="bg-gradient-to-r from-green-700 to-green-600 px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-white font-bold text-sm">✅ Analysis Complete</h3>
-                    <p className="text-green-200 text-xs mt-0.5">
-                      {currentAnalysis.results.length} grid points classified
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => { setAnalysis(null as unknown as typeof currentAnalysis); }}
-                    className="text-green-300 hover:text-white text-xs border border-green-500 hover:border-white rounded px-2 py-0.5 transition-colors"
-                  >
-                    ✕ Clear
-                  </button>
+        {/* Results Panel — shown after analysis completes */}
+        {currentAnalysis?.results?.length && (() => {
+          const CLASSES = [
+            { cls: 'S1', label: 'Highly Suitable',        desc: 'No significant limitations for the intended use.',           color: '#166534', bg: '#dcfce7' },
+            { cls: 'S2', label: 'Moderately Suitable',    desc: 'Minor limitations that may reduce productivity or benefit.',  color: '#16a34a', bg: '#bbf7d0' },
+            { cls: 'S3', label: 'Marginally Suitable',    desc: 'Limitations that reduce productivity; special management needed.', color: '#ca8a04', bg: '#fef9c3' },
+            { cls: 'S4', label: 'Currently Unsuitable',   desc: 'Limitations severe enough to prevent sustainable use under current conditions.', color: '#ea580c', bg: '#ffedd5' },
+            { cls: 'S5', label: 'Permanently Unsuitable', desc: 'Limitations so severe that sustainable use is not possible.',  color: '#991b1b', bg: '#fee2e2' },
+          ] as const;
+          const total = currentAnalysis.results!.length;
+
+          const ALL_ANALYSES = [
+            { id: 'development-suitability',  icon: '🏗️', title: 'Development Suitability',    category: 'Suitability'    },
+            { id: 'agriculture-suitability',  icon: '🌾', title: 'Agricultural Suitability',   category: 'Suitability'    },
+            { id: 'cyclone-risk',             icon: '🌀', title: 'Cyclone Hazard Risk',         category: 'Hazard'         },
+            { id: 'flood-risk',               icon: '🌊', title: 'Flood Risk Assessment',       category: 'Hazard'         },
+            { id: 'tsunami-vulnerability',    icon: '🌊', title: 'Tsunami Vulnerability',       category: 'Hazard'         },
+            { id: 'earthquake-hazard',        icon: '📳', title: 'Earthquake Hazard',           category: 'Hazard'         },
+            { id: 'volcanic-hazard',          icon: '🌋', title: 'Volcanic Hazard',             category: 'Hazard'         },
+            { id: 'landslide-risk',           icon: '🏔️', title: 'Landslide Risk',              category: 'Hazard'         },
+            { id: 'infrastructure-assessment',icon: '🛣️', title: 'Infrastructure Assessment',   category: 'Infrastructure' },
+            { id: 'building-vulnerability',   icon: '🏚️', title: 'Building Vulnerability',      category: 'Infrastructure' },
+            { id: 'coastal-erosion',          icon: '🏝️', title: 'Coastal Erosion',             category: 'Environment'    },
+            { id: 'biodiversity',             icon: '🦜', title: 'Biodiversity & Conservation', category: 'Environment'    },
+          ];
+
+          return (
+            <div
+              className="absolute top-4 right-4 z-20 pointer-events-auto flex flex-col bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden"
+              style={{ width: 340, maxHeight: 'calc(100vh - 120px)' }}
+            >
+              {/* ── Header ── */}
+              <div className="bg-gradient-to-r from-green-700 to-green-600 px-4 py-3 flex items-center justify-between shrink-0">
+                <div>
+                  <h3 className="text-white font-bold text-sm">✅ Analysis Complete</h3>
+                  <p className="text-green-200 text-xs mt-0.5">
+                    {total} grid points classified across drawn area
+                  </p>
                 </div>
+                <button
+                  onClick={() => setAnalysis(null as unknown as typeof currentAnalysis)}
+                  className="text-green-300 hover:text-white text-xs border border-green-500 hover:border-white rounded px-2 py-0.5 transition-colors"
+                >
+                  ✕ Clear
+                </button>
               </div>
 
-              {/* Class breakdown */}
-              <div className="px-4 py-3 border-b border-gray-100">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Suitability Classification</p>
-                <div className="space-y-1.5">
-                  {([
-                    { cls: 'S1', label: 'Highly Suitable',    color: '#166534', bg: '#dcfce7' },
-                    { cls: 'S2', label: 'Moderately Suitable', color: '#16a34a', bg: '#bbf7d0' },
-                    { cls: 'S3', label: 'Marginally Suitable', color: '#ca8a04', bg: '#fef9c3' },
-                    { cls: 'S4', label: 'Currently Unsuitable',color: '#ea580c', bg: '#ffedd5' },
-                    { cls: 'S5', label: 'Permanently Unsuitable',color:'#991b1b', bg: '#fee2e2' },
-                  ] as const).map(({ cls, label: _label, color, bg }) => {
-                    const count = currentAnalysis.results!.filter(r => r.suitabilityClass === cls).length;
-                    const pct = Math.round((count / currentAnalysis.results!.length) * 100);
-                    if (count === 0) return null;
-                    return (
-                      <div key={cls} className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-6 text-center rounded px-0.5" style={{ color, background: bg }}>{cls}</span>
-                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+              {/* Scrollable body */}
+              <div className="overflow-y-auto flex-1 min-h-0">
+
+                {/* ── Suitability breakdown bars ── */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Suitability Classification
+                  </p>
+                  <div className="space-y-1.5">
+                    {CLASSES.map(({ cls, label, color, bg }) => {
+                      const count = currentAnalysis.results!.filter(r => r.suitabilityClass === cls).length;
+                      const pct   = Math.round((count / total) * 100);
+                      if (count === 0) return null;
+                      return (
+                        <div key={cls} className="flex items-center gap-2">
+                          <span
+                            className="text-[10px] font-bold w-7 text-center rounded shrink-0 py-0.5"
+                            style={{ color, background: bg }}
+                          >
+                            {cls}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-xs font-medium text-gray-700 truncate">{label}</span>
+                              <span className="text-xs text-gray-500 ml-2 shrink-0">{count} ({pct}%)</span>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{ width: `${pct}%`, background: color }}
+                              />
+                            </div>
+                          </div>
                         </div>
-                        <span className="text-xs text-gray-500 w-12 text-right">{count} ({pct}%)</span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ── Suitability class legend with full descriptions ── */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Suitability Class Legend
+                  </p>
+                  <div className="space-y-2">
+                    {CLASSES.map(({ cls, label, desc, color, bg }) => (
+                      <div key={cls} className="flex items-start gap-2">
+                        <span
+                          className="text-[10px] font-bold w-7 text-center rounded shrink-0 mt-0.5 py-0.5"
+                          style={{ color, background: bg }}
+                        >
+                          {cls}
+                        </span>
+                        <div>
+                          <p className="text-xs font-semibold text-gray-800">{label}</p>
+                          <p className="text-[10px] text-gray-500 leading-snug">{desc}</p>
+                        </div>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── All available analyses ── */}
+                <div className="px-4 py-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    All Available Analyses
+                  </p>
+                  <div className="space-y-0.5">
+                    {ALL_ANALYSES.map(a => (
+                      <div
+                        key={a.id}
+                        className="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-gray-50 group transition-colors border border-transparent hover:border-gray-200 cursor-pointer"
+                        onClick={() => handleRunAnalysis(a.id)}
+                      >
+                        <span className="text-base shrink-0">{a.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-900 truncate">{a.title}</p>
+                          <p className="text-[10px] text-gray-400">{a.category}</p>
+                        </div>
+                        <button
+                          disabled={isProcessing}
+                          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-[10px] font-semibold bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
+                        >
+                          Run
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Suitability class legend */}
-              <div className="px-4 py-2 border-b border-gray-100">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Legend</p>
-                <div className="flex gap-2 flex-wrap">
-                  {(['S1','S2','S3','S4','S5'] as const).map((cls, i) => {
-                    const colors = ['#166534','#16a34a','#ca8a04','#ea580c','#991b1b'];
-                    return (
-                      <div key={cls} className="flex items-center gap-1 text-xs text-gray-600">
-                        <span className="w-3 h-3 rounded-full border border-white shadow-sm" style={{ background: colors[i] }} />
-                        {cls}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Generate Report CTA */}
-              <div className="px-4 py-3 bg-gray-50 flex flex-col gap-2">
+              {/* ── Footer CTAs ── */}
+              <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex flex-col gap-2 shrink-0">
                 <button
                   onClick={() => navigate('/reports')}
                   className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -431,8 +504,8 @@ export default function MapQueryWorkspace() {
                 </button>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Draw Mode Indicator */}
         {drawMode && (
