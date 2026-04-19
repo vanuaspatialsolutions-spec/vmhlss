@@ -11,7 +11,9 @@ import MapLayerPanel from '../map/MapLayerPanel';
 import QueryPanel from '../map/QueryPanel';
 import ResultsPopup from '../map/ResultsPopup';
 import AoiInspectorPanel from '../map/AoiInspectorPanel';
+import HazardAnalysisPanel from '../map/HazardAnalysisPanel';
 import type { GeoJSON } from '../../types/index';
+import type { EnhancedAnalysisData } from '../../services/localEngine';
 
 export default function MapQueryWorkspace() {
   const navigate = useNavigate();
@@ -143,97 +145,129 @@ export default function MapQueryWorkspace() {
     map.current.fitBounds(bounds, { padding: 50 });
   }, [currentAoi]);
 
-  // Display results on map — triggered when analysis completes
+  // Display results on map — polygon choropleth cells (Paper 1 susceptibility map style)
   useEffect(() => {
     if (!map.current || !mapLoaded || !currentAnalysis?.results?.length) return;
 
     const m = map.current;
 
-    // Remove any previous results layers
-    ['results-halo', 'results-fill', 'results-label'].forEach(id => {
+    // Clean up previous result layers
+    ['results-cells-fill', 'results-cells-stroke', 'results-label', 'results-halo', 'results-fill'].forEach(id => {
       if (m.getLayer(id)) m.removeLayer(id);
     });
-    if (m.getSource('results')) m.removeSource('results');
+    ['results-cells', 'results'].forEach(id => {
+      if (m.getSource(id)) m.removeSource(id);
+    });
 
-    const geojson: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: currentAnalysis.results.map((result) => ({
-        type: 'Feature' as const,
-        geometry: result.geometry,
-        properties: {
-          suitabilityClass: result.suitabilityClass,
-          chiScore: result.chiScore,
-          confidence: result.confidence,
-          label: result.suitabilityClass,
+    // Use pre-computed polygon cells if available (enhanced analysis), otherwise fall back to point circles
+    const enh = currentAnalysis as unknown as (typeof currentAnalysis & EnhancedAnalysisData);
+    const cellPolygons = enh.cellPolygons;
+
+    if (cellPolygons?.features?.length) {
+      // ── Polygon choropleth (Paper 1 susceptibility map approach) ──
+      m.addSource('results-cells', {
+        type: 'geojson',
+        data: cellPolygons as unknown as object,
+      });
+
+      // Fill cells by suitability class — green=S1 → red=S5
+      m.addLayer({
+        id: 'results-cells-fill',
+        type: 'fill',
+        source: 'results-cells',
+        paint: {
+          'fill-color': [
+            'match', ['get', 'suitabilityClass'],
+            'S1', '#166534',
+            'S2', '#16a34a',
+            'S3', '#ca8a04',
+            'S4', '#ea580c',
+            'S5', '#991b1b',
+            '#6b7280',
+          ],
+          'fill-opacity': 0.72,
         },
-      })),
-    };
+      });
 
-    m.addSource('results', { type: 'geojson', data: geojson as unknown as object });
+      // Thin white border between cells
+      m.addLayer({
+        id: 'results-cells-stroke',
+        type: 'line',
+        source: 'results-cells',
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': 0.6,
+          'line-opacity': 0.5,
+        },
+      });
 
-    // White halo for visibility over basemap
-    m.addLayer({
-      id: 'results-halo',
-      type: 'circle',
-      source: 'results',
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 18],
-        'circle-color': '#ffffff',
-        'circle-opacity': 0.5,
-      },
-    });
+      // Class label at higher zoom (symbol centroid auto-placed)
+      m.addLayer({
+        id: 'results-label',
+        type: 'symbol',
+        source: 'results-cells',
+        minzoom: 12,
+        layout: {
+          'text-field': ['get', 'suitabilityClass'],
+          'text-size': 9,
+          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+        },
+        paint: {
+          'text-color': '#ffffff',
+          'text-halo-color': '#00000055',
+          'text-halo-width': 1,
+        },
+      });
 
-    // Coloured fill by suitability class
-    m.addLayer({
-      id: 'results-fill',
-      type: 'circle',
-      source: 'results',
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 7, 14, 14],
-        'circle-color': [
-          'match', ['get', 'suitabilityClass'],
-          'S1', '#166534',
-          'S2', '#16a34a',
-          'S3', '#ca8a04',
-          'S4', '#ea580c',
-          'S5', '#991b1b',
-          '#6b7280',
-        ],
-        'circle-opacity': 0.9,
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#ffffff',
-      },
-    });
+      // Click to popup
+      m.on('click', 'results-cells-fill', (e: MapMouseEvent) => {
+        const feature = e.features?.[0];
+        if (feature) {
+          setPopupContent(feature.properties);
+          setPopupPosition([e.point.x, e.point.y]);
+        }
+      });
+      m.on('mouseenter', 'results-cells-fill', () => { m.getCanvas().style.cursor = 'pointer'; });
+      m.on('mouseleave', 'results-cells-fill', () => { m.getCanvas().style.cursor = ''; });
 
-    // Class label at higher zoom
-    m.addLayer({
-      id: 'results-label',
-      type: 'symbol',
-      source: 'results',
-      minzoom: 11,
-      layout: {
-        'text-field': ['get', 'label'],
-        'text-size': 10,
-        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-        'text-offset': [0, -1.4],
-      },
-      paint: {
-        'text-color': '#1f2937',
-        'text-halo-color': '#ffffff',
-        'text-halo-width': 1,
-      },
-    });
-
-    // Click handler — show popup
-    m.on('click', 'results-fill', (e: MapMouseEvent) => {
-      const feature = e.features?.[0];
-      if (feature) {
-        setPopupContent(feature.properties);
-        setPopupPosition([e.point.x, e.point.y]);
-      }
-    });
-    m.on('mouseenter', 'results-fill', () => { m.getCanvas().style.cursor = 'pointer'; });
-    m.on('mouseleave', 'results-fill', () => { m.getCanvas().style.cursor = ''; });
+    } else {
+      // ── Fallback: point circles (legacy) ──
+      const geojson: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: currentAnalysis.results.map(result => ({
+          type: 'Feature' as const,
+          geometry: result.geometry,
+          properties: {
+            suitabilityClass: result.suitabilityClass,
+            chiScore:  result.chiScore,
+            confidence: result.confidence,
+            label: result.suitabilityClass,
+          },
+        })),
+      };
+      m.addSource('results', { type: 'geojson', data: geojson as unknown as object });
+      m.addLayer({
+        id: 'results-fill',
+        type: 'circle',
+        source: 'results',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 7, 14, 14],
+          'circle-color': [
+            'match', ['get', 'suitabilityClass'],
+            'S1', '#166534', 'S2', '#16a34a', 'S3', '#ca8a04', 'S4', '#ea580c', 'S5', '#991b1b', '#6b7280',
+          ],
+          'circle-opacity': 0.9,
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+      m.on('click', 'results-fill', (e: MapMouseEvent) => {
+        if (e.features?.[0]) {
+          setPopupContent(e.features[0].properties);
+          setPopupPosition([e.point.x, e.point.y]);
+        }
+      });
+    }
   }, [currentAnalysis, mapLoaded]);
 
   const startDraw = (mode: 'polygon' | 'rectangle') => {
@@ -350,162 +384,18 @@ export default function MapQueryWorkspace() {
           </div>
         )}
 
-        {/* Results Panel — shown after analysis completes */}
-        {currentAnalysis?.results?.length && (() => {
-          const CLASSES = [
-            { cls: 'S1', label: 'Highly Suitable',        desc: 'No significant limitations for the intended use.',           color: '#166534', bg: '#dcfce7' },
-            { cls: 'S2', label: 'Moderately Suitable',    desc: 'Minor limitations that may reduce productivity or benefit.',  color: '#16a34a', bg: '#bbf7d0' },
-            { cls: 'S3', label: 'Marginally Suitable',    desc: 'Limitations that reduce productivity; special management needed.', color: '#ca8a04', bg: '#fef9c3' },
-            { cls: 'S4', label: 'Currently Unsuitable',   desc: 'Limitations severe enough to prevent sustainable use under current conditions.', color: '#ea580c', bg: '#ffedd5' },
-            { cls: 'S5', label: 'Permanently Unsuitable', desc: 'Limitations so severe that sustainable use is not possible.',  color: '#991b1b', bg: '#fee2e2' },
-          ] as const;
-          const total = currentAnalysis.results!.length;
-
-          const ALL_ANALYSES = [
-            { id: 'development-suitability',  icon: '🏗️', title: 'Development Suitability',    category: 'Suitability'    },
-            { id: 'agriculture-suitability',  icon: '🌾', title: 'Agricultural Suitability',   category: 'Suitability'    },
-            { id: 'cyclone-risk',             icon: '🌀', title: 'Cyclone Hazard Risk',         category: 'Hazard'         },
-            { id: 'flood-risk',               icon: '🌊', title: 'Flood Risk Assessment',       category: 'Hazard'         },
-            { id: 'tsunami-vulnerability',    icon: '🌊', title: 'Tsunami Vulnerability',       category: 'Hazard'         },
-            { id: 'earthquake-hazard',        icon: '📳', title: 'Earthquake Hazard',           category: 'Hazard'         },
-            { id: 'volcanic-hazard',          icon: '🌋', title: 'Volcanic Hazard',             category: 'Hazard'         },
-            { id: 'landslide-risk',           icon: '🏔️', title: 'Landslide Risk',              category: 'Hazard'         },
-            { id: 'infrastructure-assessment',icon: '🛣️', title: 'Infrastructure Assessment',   category: 'Infrastructure' },
-            { id: 'building-vulnerability',   icon: '🏚️', title: 'Building Vulnerability',      category: 'Infrastructure' },
-            { id: 'coastal-erosion',          icon: '🏝️', title: 'Coastal Erosion',             category: 'Environment'    },
-            { id: 'biodiversity',             icon: '🦜', title: 'Biodiversity & Conservation', category: 'Environment'    },
-          ];
-
-          return (
-            <div
-              className="absolute top-4 right-4 z-20 pointer-events-auto flex flex-col bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden"
-              style={{ width: 340, maxHeight: 'calc(100vh - 120px)' }}
-            >
-              {/* ── Header ── */}
-              <div className="bg-gradient-to-r from-green-700 to-green-600 px-4 py-3 flex items-center justify-between shrink-0">
-                <div>
-                  <h3 className="text-white font-bold text-sm">✅ Analysis Complete</h3>
-                  <p className="text-green-200 text-xs mt-0.5">
-                    {total} grid points classified across drawn area
-                  </p>
-                </div>
-                <button
-                  onClick={() => setAnalysis(null as unknown as typeof currentAnalysis)}
-                  className="text-green-300 hover:text-white text-xs border border-green-500 hover:border-white rounded px-2 py-0.5 transition-colors"
-                >
-                  ✕ Clear
-                </button>
-              </div>
-
-              {/* Scrollable body */}
-              <div className="overflow-y-auto flex-1 min-h-0">
-
-                {/* ── Suitability breakdown bars ── */}
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    Suitability Classification
-                  </p>
-                  <div className="space-y-1.5">
-                    {CLASSES.map(({ cls, label, color, bg }) => {
-                      const count = currentAnalysis.results!.filter(r => r.suitabilityClass === cls).length;
-                      const pct   = Math.round((count / total) * 100);
-                      if (count === 0) return null;
-                      return (
-                        <div key={cls} className="flex items-center gap-2">
-                          <span
-                            className="text-[10px] font-bold w-7 text-center rounded shrink-0 py-0.5"
-                            style={{ color, background: bg }}
-                          >
-                            {cls}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="text-xs font-medium text-gray-700 truncate">{label}</span>
-                              <span className="text-xs text-gray-500 ml-2 shrink-0">{count} ({pct}%)</span>
-                            </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full transition-all"
-                                style={{ width: `${pct}%`, background: color }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* ── Suitability class legend with full descriptions ── */}
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    Suitability Class Legend
-                  </p>
-                  <div className="space-y-2">
-                    {CLASSES.map(({ cls, label, desc, color, bg }) => (
-                      <div key={cls} className="flex items-start gap-2">
-                        <span
-                          className="text-[10px] font-bold w-7 text-center rounded shrink-0 mt-0.5 py-0.5"
-                          style={{ color, background: bg }}
-                        >
-                          {cls}
-                        </span>
-                        <div>
-                          <p className="text-xs font-semibold text-gray-800">{label}</p>
-                          <p className="text-[10px] text-gray-500 leading-snug">{desc}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* ── All available analyses ── */}
-                <div className="px-4 py-3">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    All Available Analyses
-                  </p>
-                  <div className="space-y-0.5">
-                    {ALL_ANALYSES.map(a => (
-                      <div
-                        key={a.id}
-                        className="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-gray-50 group transition-colors border border-transparent hover:border-gray-200 cursor-pointer"
-                        onClick={() => handleRunAnalysis(a.id)}
-                      >
-                        <span className="text-base shrink-0">{a.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-gray-900 truncate">{a.title}</p>
-                          <p className="text-[10px] text-gray-400">{a.category}</p>
-                        </div>
-                        <button
-                          disabled={isProcessing}
-                          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-[10px] font-semibold bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
-                        >
-                          Run
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Footer CTAs ── */}
-              <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex flex-col gap-2 shrink-0">
-                <button
-                  onClick={() => navigate('/reports')}
-                  className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 active:scale-95 transition-all flex items-center justify-center gap-2"
-                >
-                  📄 Generate Report
-                </button>
-                <button
-                  onClick={handleClearAoi}
-                  className="w-full py-1.5 px-4 bg-white text-gray-600 border border-gray-300 rounded-lg text-xs font-medium hover:bg-gray-100 transition-all"
-                >
-                  Draw New Area
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        {/* Results Panel — HazardAnalysisPanel (Paper 1 + Paper 2 methodology) */}
+        {currentAnalysis?.results?.length ? (
+          <div className="absolute top-4 right-4 z-20 pointer-events-auto">
+            <HazardAnalysisPanel
+              analysis={currentAnalysis as unknown as Parameters<typeof HazardAnalysisPanel>[0]['analysis']}
+              onClearAoi={handleClearAoi}
+              onRunAnalysis={handleRunAnalysis}
+              onGoToReports={() => navigate('/reports')}
+              isProcessing={isProcessing}
+            />
+          </div>
+        ) : null}
 
         {/* Draw Mode Indicator */}
         {drawMode && (
