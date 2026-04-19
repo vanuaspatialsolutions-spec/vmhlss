@@ -20,6 +20,9 @@ export default function MapQueryWorkspace() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  // styleVersion increments on every style.load (initial + basemap switches)
+  // so AOI and results effects re-run and re-add their layers after style reloads
+  const [styleVersion, setStyleVersion] = useState(0);
   const [drawMode, setDrawMode] = useState<'polygon' | 'rectangle' | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<[number, number][]>([]);
   const [popupContent, setPopupContent] = useState<any>(null);
@@ -75,12 +78,19 @@ export default function MapQueryWorkspace() {
       }
     });
 
+    // style.load fires on initial load AND after every setStyle call.
+    // Increment styleVersion so AOI + results effects re-run and re-add their layers.
+    map.current.on('style.load', () => {
+      if (!map.current) return;
+      addHazardLayers(map.current);
+      addSuitabilityLayers(map.current);
+      setStyleVersion(v => v + 1);
+    });
+
     // Mark map as loaded — triggers OSM layer fetching
     map.current.on('load', () => {
       if (!map.current) return;
       setMapLoaded(true);
-      addHazardLayers(map.current);
-      addSuitabilityLayers(map.current);
     });
 
     return () => {
@@ -96,65 +106,64 @@ export default function MapQueryWorkspace() {
   }, [baseMap]);
 
   // Draw AOI on map
+  // styleVersion in deps ensures layers are re-added after a basemap style reload
   useEffect(() => {
-    if (!map.current || !currentAoi) return;
+    if (!map.current || !mapLoaded || !currentAoi) return;
+    const m = map.current;
 
-    // Remove existing AOI layer
-    if (map.current.getSource('aoi')) {
-      map.current.removeLayer('aoi-fill');
-      map.current.removeLayer('aoi-outline');
-      map.current.removeSource('aoi');
-    }
+    // Safely remove stale layers — style reload may have already wiped them
+    try {
+      if (m.getSource('aoi')) {
+        if (m.getLayer('aoi-fill'))    m.removeLayer('aoi-fill');
+        if (m.getLayer('aoi-outline')) m.removeLayer('aoi-outline');
+        m.removeSource('aoi');
+      }
+    } catch { /* style may have been reset */ }
 
-    // Add AOI
-    map.current.addSource('aoi', {
+    if (!m.isStyleLoaded()) return; // guard against race with style.load
+
+    m.addSource('aoi', {
       type: 'geojson',
-      data: {
-        type: 'Feature',
-        geometry: currentAoi,
-        properties: {},
-      },
+      data: { type: 'Feature', geometry: currentAoi, properties: {} },
     });
-
-    map.current.addLayer({
+    m.addLayer({
       id: 'aoi-fill',
       type: 'fill',
       source: 'aoi',
-      paint: {
-        'fill-color': '#10b981',
-        'fill-opacity': 0.2,
-      },
+      paint: { 'fill-color': '#10b981', 'fill-opacity': 0.2 },
     });
-
-    map.current.addLayer({
+    m.addLayer({
       id: 'aoi-outline',
       type: 'line',
       source: 'aoi',
-      paint: {
-        'line-color': '#059669',
-        'line-width': 2,
-      },
+      paint: { 'line-color': '#059669', 'line-width': 2 },
     });
 
-    // Fit bounds
+    // Fit bounds only when AOI itself changed (not on style reload)
     const coords = currentAoi.coordinates[0] as [number, number][];
     const bounds = coords.reduce(
       (b: LngLatBounds, coord) => b.extend(coord as LngLatLike),
       new LngLatBounds(coords[0] as LngLatLike, coords[0] as LngLatLike)
     );
-    map.current.fitBounds(bounds, { padding: 50 });
-  }, [currentAoi]);
+    m.fitBounds(bounds, { padding: 50 });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentAoi, mapLoaded, styleVersion]);
 
   // Display results on map — polygon choropleth cells (Paper 1 susceptibility map style)
+  // styleVersion in deps ensures layers are re-added after a basemap style reload
   useEffect(() => {
     if (!map.current || !mapLoaded || !currentAnalysis?.results?.length) return;
 
     const m = map.current;
+    if (!m.isStyleLoaded()) return; // guard: style.load will bump styleVersion and re-trigger
 
-    // Clean up previous result layers
-    ['results-cells-fill', 'results-cells-stroke', 'results-label', 'results-halo', 'results-fill'].forEach(id => {
-      if (m.getLayer(id)) m.removeLayer(id);
-    });
+    // Clean up previous result layers (may be absent after style reload — try/catch)
+    try {
+      ['results-cells-fill', 'results-cells-stroke', 'results-label', 'results-halo', 'results-fill'].forEach(id => {
+        if (m.getLayer(id)) m.removeLayer(id);
+      });
+    } catch { /* style may have been reset */ }
+
     ['results-cells', 'results'].forEach(id => {
       if (m.getSource(id)) m.removeSource(id);
     });
@@ -268,7 +277,8 @@ export default function MapQueryWorkspace() {
         }
       });
     }
-  }, [currentAnalysis, mapLoaded]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentAnalysis, mapLoaded, styleVersion]);
 
   const startDraw = (mode: 'polygon' | 'rectangle') => {
     setDrawMode(mode);
